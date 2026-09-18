@@ -1,1 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.ipynb_checkpoints/
 
+runs/
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+*.pt
+*.onnx
+.DS_Store
