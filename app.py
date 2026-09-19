@@ -1,5 +1,6 @@
 import os
 import tempfile
+import subprocess
 import cv2
 import streamlit as st
 from ultralytics import YOLO
@@ -27,11 +28,11 @@ if uploaded_file is not None:
 
     input_path = os.path.join(
         tempfile.gettempdir(),
-        uploaded_file.name
+        "input_video.mp4"
     )
 
-    with open(input_path, "wb") as file:
-        file.write(uploaded_file.getbuffer())
+    with open(input_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
 
     st.success("✅ Video uploaded successfully!")
 
@@ -40,7 +41,12 @@ if uploaded_file is not None:
 
     if st.button("🚀 Detect & Track Objects"):
 
-        output_path = os.path.join(
+        raw_output = os.path.join(
+            tempfile.gettempdir(),
+            "tracked_raw.mp4"
+        )
+
+        final_output = os.path.join(
             tempfile.gettempdir(),
             "tracked_output.mp4"
         )
@@ -54,18 +60,16 @@ if uploaded_file is not None:
         if fps <= 0:
             fps = 30
 
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-
         writer = cv2.VideoWriter(
-            output_path,
-            fourcc,
+            raw_output,
+            cv2.VideoWriter_fourcc(*"mp4v"),
             fps,
             (width, height)
         )
 
         frame_count = 0
 
-        with st.spinner("⏳ Detecting and tracking objects..."):
+        with st.spinner("⏳ Detecting and tracking..."):
 
             while True:
 
@@ -82,7 +86,12 @@ if uploaded_file is not None:
                     verbose=False
                 )
 
-                annotated_frame = results[0].plot()
+                result = results[0]
+
+                annotated_frame = result.plot(
+                    labels=True,
+                    boxes=True
+                )
 
                 writer.write(annotated_frame)
 
@@ -91,7 +100,35 @@ if uploaded_file is not None:
         cap.release()
         writer.release()
 
-        if os.path.exists(output_path) and frame_count > 0:
+        if frame_count > 0:
+
+            try:
+
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        raw_output,
+                        "-c:v",
+                        "libx264",
+                        "-pix_fmt",
+                        "yuv420p",
+                        "-movflags",
+                        "+faststart",
+                        "-an",
+                        final_output
+                    ],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+
+            except Exception as e:
+
+                st.error("❌ Video conversion failed.")
+                st.exception(e)
+                st.stop()
 
             st.success(
                 "✅ Object detection and tracking completed!"
@@ -99,10 +136,10 @@ if uploaded_file is not None:
 
             st.subheader("🎯 Tracked Video")
 
-            st.video(output_path)
+            st.video(final_output)
 
-            with open(output_path, "rb") as file:
-                video_bytes = file.read()
+            with open(final_output, "rb") as f:
+                video_bytes = f.read()
 
             st.download_button(
                 label="⬇️ Download Tracked Video",
@@ -113,9 +150,7 @@ if uploaded_file is not None:
 
         else:
 
-            st.error(
-                "❌ Tracking video could not be created."
-            )
+            st.error("❌ No video frames were processed.")
 
 else:
 
