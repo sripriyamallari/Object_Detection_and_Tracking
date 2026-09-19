@@ -30,13 +30,13 @@ if uploaded_file is not None:
         uploaded_file.name
     )
 
-    with open(input_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
+    with open(input_path, "wb") as file:
+        file.write(uploaded_file.getbuffer())
 
     st.success("✅ Video uploaded successfully!")
 
     st.subheader("🎥 Original Video")
-    st.video(uploaded_file)
+    st.video(input_path)
 
     if st.button("🚀 Detect & Track Objects"):
 
@@ -55,6 +55,7 @@ if uploaded_file is not None:
             fps = 30
 
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+
         writer = cv2.VideoWriter(
             output_path,
             fourcc,
@@ -64,7 +65,7 @@ if uploaded_file is not None:
 
         frame_count = 0
 
-        with st.spinner("⏳ Detecting and tracking..."):
+        with st.spinner("⏳ Detecting and tracking objects..."):
 
             while True:
 
@@ -81,59 +82,10 @@ if uploaded_file is not None:
                     verbose=False
                 )
 
-                result = results[0]
+                annotated_frame = results[0].plot()
 
-                if result.boxes is not None:
+                writer.write(annotated_frame)
 
-                    boxes = result.boxes.xyxy.cpu().numpy()
-
-                    if result.boxes.id is not None:
-                        track_ids = result.boxes.id.int().cpu().tolist()
-                    else:
-                        track_ids = [None] * len(boxes)
-
-                    if result.boxes.cls is not None:
-                        classes = result.boxes.cls.int().cpu().tolist()
-                    else:
-                        classes = [0] * len(boxes)
-
-                    for box, track_id, cls in zip(
-                        boxes,
-                        track_ids,
-                        classes
-                    ):
-
-                        x1, y1, x2, y2 = map(int, box)
-
-                        class_name = model.names.get(
-                            cls,
-                            "Object"
-                        )
-
-                        if track_id is not None:
-                            label = f"{class_name} ID: {track_id}"
-                        else:
-                            label = f"{class_name} ID: ?"
-
-                        cv2.rectangle(
-                            frame,
-                            (x1, y1),
-                            (x2, y2),
-                            (0, 255, 0),
-                            2
-                        )
-
-                        cv2.putText(
-                            frame,
-                            label,
-                            (x1, max(y1 - 10, 20)),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.6,
-                            (0, 255, 0),
-                            2
-                        )
-
-                writer.write(frame)
                 frame_count += 1
 
         cap.release()
@@ -149,18 +101,27 @@ if uploaded_file is not None:
 
             st.video(output_path)
 
-            with open(output_path, "rb") as f:
-                video_bytes = f.read()
+            with open(output_path, "rb") as file:
+                video_bytes = file.read()
 
             st.download_button(
-                "⬇️ Download Tracked Video",
+                label="⬇️ Download Tracked Video",
                 data=video_bytes,
                 file_name="tracked_output.mp4",
                 mime="video/mp4"
             )
 
         else:
-            st.error("❌ Tracking video could not be created.")
+
+            st.error(
+                "❌ Tracking video could not be created."
+            )
 
 else:
-    st.info("👆 Upload a video to begin.")
+
+    st.info(
+        "👆 Upload a video to start object detection and tracking."
+    )
+
+st.markdown("---")
+st.caption("Built with YOLO + ByteTrack + Streamlit")
