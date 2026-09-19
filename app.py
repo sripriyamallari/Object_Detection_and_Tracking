@@ -1,31 +1,24 @@
-import os
+
+    import os
 import tempfile
+import cv2
 import streamlit as st
 from ultralytics import YOLO
 
 st.set_page_config(
     page_title="Object Detection and Tracking",
-    page_icon="🎯",
-    layout="centered"
+    page_icon="🎯"
 )
 
 st.title("🎯 Object Detection and Tracking")
-st.write("Detect and track objects in a video using YOLO and ByteTrack.")
+st.write("Detect and track objects using YOLO + ByteTrack.")
 
 @st.cache_resource
 def load_model():
     return YOLO("yolo26n.pt")
 
-# Load model
-try:
-    model = load_model()
-    st.success("✅ YOLO model loaded successfully!")
-except Exception as e:
-    st.error("❌ Could not load YOLO model.")
-    st.exception(e)
-    st.stop()
+model = load_model()
 
-# Upload video
 uploaded_file = st.file_uploader(
     "📤 Upload a video",
     type=["mp4", "avi", "mov", "mkv"]
@@ -33,7 +26,6 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
 
-    # Save uploaded video temporarily
     input_path = os.path.join(
         tempfile.gettempdir(),
         uploaded_file.name
@@ -44,83 +36,132 @@ if uploaded_file is not None:
 
     st.success("✅ Video uploaded successfully!")
 
-    # Show original video
     st.subheader("🎥 Original Video")
     st.video(uploaded_file)
 
     if st.button("🚀 Detect & Track Objects"):
 
-        output_dir = tempfile.mkdtemp()
-        output_name = "tracked_video"
+        output_path = os.path.join(
+            tempfile.gettempdir(),
+            "tracked_output.mp4"
+        )
 
-        try:
-            with st.spinner(
-                "⏳ Detecting and tracking objects... Please wait."
-            ):
+        cap = cv2.VideoCapture(input_path)
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        if fps <= 0:
+            fps = 30
+
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(
+            output_path,
+            fourcc,
+            fps,
+            (width, height)
+        )
+
+        frame_count = 0
+
+        with st.spinner("⏳ Detecting and tracking..."):
+
+            while True:
+
+                success, frame = cap.read()
+
+                if not success:
+                    break
+
                 results = model.track(
-                    source=input_path,
+                    frame,
+                    persist=True,
                     tracker="bytetrack.yaml",
                     conf=0.25,
-                    save=True,
-                    project=output_dir,
-                    name=output_name,
-                    exist_ok=True,
-                    stream=False,
                     verbose=False
                 )
 
-            # Find generated video
-            result_folder = os.path.join(
-                output_dir,
-                output_name
+                result = results[0]
+
+                if result.boxes is not None:
+
+                    boxes = result.boxes.xyxy.cpu().numpy()
+
+                    if result.boxes.id is not None:
+                        track_ids = result.boxes.id.int().cpu().tolist()
+                    else:
+                        track_ids = [None] * len(boxes)
+
+                    if result.boxes.cls is not None:
+                        classes = result.boxes.cls.int().cpu().tolist()
+                    else:
+                        classes = [0] * len(boxes)
+
+                    for box, track_id, cls in zip(
+                        boxes,
+                        track_ids,
+                        classes
+                    ):
+
+                        x1, y1, x2, y2 = map(int, box)
+
+                        class_name = model.names.get(
+                            cls,
+                            "Object"
+                        )
+
+                        if track_id is not None:
+                            label = f"{class_name} ID: {track_id}"
+                        else:
+                            label = f"{class_name} ID: ?"
+
+                        cv2.rectangle(
+                            frame,
+                            (x1, y1),
+                            (x2, y2),
+                            (0, 255, 0),
+                            2
+                        )
+
+                        cv2.putText(
+                            frame,
+                            label,
+                            (x1, max(y1 - 10, 20)),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.6,
+                            (0, 255, 0),
+                            2
+                        )
+
+                writer.write(frame)
+                frame_count += 1
+
+        cap.release()
+        writer.release()
+
+        if os.path.exists(output_path) and frame_count > 0:
+
+            st.success(
+                "✅ Object detection and tracking completed!"
             )
 
-            output_video = None
+            st.subheader("🎯 Tracked Video")
 
-            for root, dirs, files in os.walk(result_folder):
-                for file in files:
-                    if file.lower().endswith(
-                        (".mp4", ".avi", ".mov", ".mkv")
-                    ):
-                        output_video = os.path.join(root, file)
-                        break
+            st.video(output_path)
 
-                if output_video:
-                    break
+            with open(output_path, "rb") as f:
+                video_bytes = f.read()
 
-            if output_video and os.path.exists(output_video):
+            st.download_button(
+                "⬇️ Download Tracked Video",
+                data=video_bytes,
+                file_name="tracked_output.mp4",
+                mime="video/mp4"
+            )
 
-                st.success(
-                    "✅ Object detection and tracking completed!"
-                )
-
-                st.subheader("🎯 Tracked Video")
-
-                st.video(output_video)
-
-                with open(output_video, "rb") as video_file:
-                    video_bytes = video_file.read()
-
-                st.download_button(
-                    label="⬇️ Download Tracked Video",
-                    data=video_bytes,
-                    file_name="tracked_output.mp4",
-                    mime="video/mp4"
-                )
-
-            else:
-                st.error(
-                    "❌ Tracked video was not created."
-                )
-
-        except Exception as e:
-            st.error("❌ An error occurred while processing the video.")
-            st.exception(e)
+        else:
+            st.error("❌ Tracking video could not be created.")
 
 else:
-    st.info(
-        "👆 Upload an MP4 video above to start object detection and tracking."
-    )
-
-st.markdown("---")
-st.caption("Built with YOLO + ByteTrack + Streamlit")
+    st.info("👆 Upload a video to begin.")
